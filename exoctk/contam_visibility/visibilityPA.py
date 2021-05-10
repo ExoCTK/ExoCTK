@@ -172,7 +172,11 @@ def checkVisPA(ra, dec, targetName=None, ephFileName=None, fig=None):
 
     # Draw the curve and error
     try:
-        fig.line(gdMaskednum, paMasked, legend_label='cutoff', line_color=color)
+        fig.line(
+            gdMaskednum,
+            paMasked,
+            legend_label='cutoff',
+            line_color=color)
     except AttributeError:
         fig.line(gdMaskednum, paMasked, legend='cutoff', line_color=color)
 
@@ -199,29 +203,7 @@ def checkVisPA(ra, dec, targetName=None, ephFileName=None, fig=None):
     return paGood, paBad, gd, fig
 
 
-def fill_between(fig, xdata, pamin, pamax, **kwargs):
-    # addressing NIRSpec issue
-
-    # now creating the patches for the arrays
-    nanbot = np.where([np.isnan(i) for i in pamin])[0]
-    nantop = np.where([np.isnan(i) for i in pamax])[0]
-    yb = np.split(pamin, nanbot)
-    xs = np.split(xdata, nanbot)
-    yt = np.split(pamax, nantop)
-    for x, bot, top in zip(xs, yb, yt):
-        x = np.append(x, x[::-1])
-        y = np.append(bot, top[::-1])
-        fig.patch(x, y, **kwargs)
-    return fig
-
-
-def using_gtvt(
-        ra,
-        dec,
-        instrument,
-        targetName='noName',
-        ephFileName=None,
-        output='bokeh'):
+def using_gtvt(ra, dec, instrument, targetName='noName', ephFileName=None, output='bokeh'):
     """Plot the visibility (at a range of position angles) against time.
 
     Parameters
@@ -321,7 +303,7 @@ def using_gtvt(
                        legend='Nominal Aperture PA',
                        alpha=.5,
                        source=SOURCE)
-                       
+
     fig.circle('date', 'pamin', color=COLOR, size=1, source=SOURCE)
     fig.circle('date', 'pamax', color=COLOR, size=1, source=SOURCE)
 
@@ -389,33 +371,61 @@ def using_gtvt(
     # This addresses a bokeh shading issue that accidentally shades
     # accessible PAs (e.g: trappist-1b)
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    remove_pa = []
-    for badpa in badPAs:
 
-        for panom in paNomnan:
-            diff = np.abs(badpa - panom)
-            if diff < 7:
-                remove_pa.append(badpa)
+    badPAs = select_badPAs_ge_paNomnan(badPAs, paNomnan)
 
-    for pa in np.unique(remove_pa):
-        badPAs.remove(pa)
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~NOTE~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Grouping the bad PAs into lists within the badPAs list.
     # This will make bad PA shading easier in the contamination Bokeh plot
     # (sossContamFig.py)
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     badPAs = np.sort(badPAs)
-    grouped_badPAs = [[badPAs[0]]]
 
-    for idx in range(1, len(badPAs)):
+    if len(badPAs > 0):
+        grouped_badPAs = [[badPAs[0]]]
 
-        if ((badPAs[idx - 1] + 1) == badPAs[idx]):
+        for idx in range(1, len(badPAs)):
 
-            grouped_badPAs[len(grouped_badPAs) - 1].append(badPAs[idx])
+            if ((badPAs[idx - 1] + 1) == badPAs[idx]):
 
-        elif ((badPAs[idx - 1] + 1) < badPAs[idx]):
-            grouped_badPAs.append([badPAs[idx]])
+                grouped_badPAs[len(grouped_badPAs) - 1].append(badPAs[idx])
 
-    grouped_badPAs = np.asarray(grouped_badPAs)
+            elif ((badPAs[idx - 1] + 1) < badPAs[idx]):
+                grouped_badPAs.append([badPAs[idx]])
+
+        grouped_badPAs = np.asarray(grouped_badPAs)
+
+    else:  # Accounting for targets with 100% visibility
+        grouped_badPAs = np.asarray([])
 
     return paMin, paMax, gd, fig, table, grouped_badPAs
+
+
+def select_badPAs_ge_paNomnan(badPAs, paNomnan, threshold=7):
+    """Returns the absolute difference between each badPAs and paNomnan
+    Should be greater than threshold (default=7)
+
+    Parameters
+    ----------
+    badPAs: list
+        The list of bad position angles
+    paNomnan: list
+        The list of nominal PAs
+
+    Returns
+    -------
+    np.ndarray
+        The array of PAs
+    """
+    # Reshaping
+    badPAs_array = np.array(badPAs)[np.newaxis]  # (1, len(badPAs))
+    paNomnan_array = np.array(paNomnan)[np.newaxis].T  # (len(paNomnan), 1)
+
+    # elementwise absolute difference
+    diff = np.abs(np.subtract(badPAs_array, paNomnan_array))  # (len(paNomnan), len(badPAs))
+
+    # boolean array above threshold
+    above_thresh = np.all(diff >= threshold, axis=0)  # (len(badPAs),)
+
+    # index and return those that are above threshold
+    return badPAs_array[0, above_thresh]
